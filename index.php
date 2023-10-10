@@ -1,4 +1,32 @@
 <?php
+$uploadFolder = 'uploads/';
+$thumbnailFolder = 'thumbnails/';
+$uploadedImagesFile = $uploadFolder . 'uploaded_images.txt';
+
+// Create the upload folder and the thumbnails folder if they don't exist
+if (!is_dir($uploadFolder)) {
+    if (!mkdir($uploadFolder, 0777, true)) {
+        die('Failed to create the upload folder.');
+    }
+}
+
+if (!is_dir($thumbnailFolder)) {
+    if (!mkdir($thumbnailFolder, 0777, true)) {
+        die('Failed to create the thumbnails folder.');
+    }
+}
+
+// Define the path to the uploaded_images.txt file
+$uploadedImagesFile = 'uploaded_images.txt';
+
+// Check if the file exists
+if (!file_exists($uploadedImagesFile)) {
+    // Attempt to create the file
+    if (file_put_contents($uploadedImagesFile, '') === false) {
+        die('Failed to create the uploaded_images.txt file.');
+    }
+}
+
 // Function to generate a new folder for each image upload
 function generateFolders() {
     $uploadFolder = 'uploads/';
@@ -141,6 +169,12 @@ function handleUpload() {
 // Check if the 'page' parameter is set
 $page = isset($_GET['page']) ? $_GET['page'] : 'home';
 
+// Check if the page is the default and redirect to 'home' if necessary
+if ($page === 'default') {
+    header('Location: ?page=home');
+    exit(); // Terminate script execution after the redirect
+}
+
 // Handle image upload if the 'page' parameter is 'upload'
 if ($page === 'upload') {
     handleUpload();
@@ -148,6 +182,9 @@ if ($page === 'upload') {
     $id = $_GET['id'];
     incrementViewCount($id);
 }
+
+$currentPage = basename($_SERVER['PHP_SELF']);
+$pageParameter = isset($_GET['page']) ? $_GET['page'] : 'home';
 ?>
 
 <!DOCTYPE html>
@@ -160,7 +197,7 @@ if ($page === 'upload') {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-GLhlTQ8iRABdZLl6O3oVMWSktQOp6b7In1Zl3/Jr59b6EGGoI1aFkw7cmDA6j6gD" crossorigin="anonymous">
-
+    <script src="https://unpkg.com/swup@3?module"></script>
     <!-- Custom CSS -->
     <style>
         .images {
@@ -202,15 +239,15 @@ if ($page === 'upload') {
         <div class="container-fluid">
             <div class="collapse navbar-collapse justify-content-center" id="navbarNav">
                 <ul class="navbar-nav">
-                    <li class="nav-item">
-                        <a class="nav-link <?php echo (basename($_SERVER['PHP_SELF']) == 'index.php' && (empty($_GET['page']) || $_GET['page'] == 'home')) ? 'active' : ''; ?>" href="index.php?page=home">Home</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link <?php echo ($_GET['page'] == 'upload') ? 'active' : ''; ?>" href="index.php?page=upload">Upload</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link <?php echo ($_GET['page'] == 'popular') ? 'active' : ''; ?>" href="index.php?page=popular">Popular</a>
-                    </li>
+                  <li class="nav-item">
+                      <a class="nav-link <?php echo ($currentPage == 'index.php' && (empty($pageParameter) || $pageParameter == 'home')) ? 'active' : ''; ?>" href="index.php?page=home">Home</a>
+                  </li>
+                  <li class="nav-item">
+                      <a class="nav-link <?php echo ($pageParameter == 'upload') ? 'active' : ''; ?>" href="index.php?page=upload">Upload</a>
+                  </li>
+                  <li class="nav-item">
+                      <a class="nav-link <?php echo ($pageParameter == 'popular') ? 'active' : ''; ?>" href="index.php?page=popular">Popular</a>
+                  </li>
                 </ul>
             </div>
         </div>
@@ -223,15 +260,26 @@ if ($page === 'upload') {
             // Assuming the image filenames and unique identifiers are stored in the 'uploaded_images.txt' file
             $imageInfo = file('uploaded_images.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 
-            // Sort the images in reverse order (latest first)
-            rsort($imageInfo);
+            // Create an array to store image data with upload timestamps
+            $imagesWithTimestamp = [];
 
-            // Display the images in a grid using Bootstrap grid system
-            echo '<div class="images">';
+            // Extract image data and timestamps
             foreach ($imageInfo as $info) {
                 list($filename, $uniqueName, $viewCount) = explode('|', $info);
-                $thumbnailUrl = 'thumbnails/' . $uniqueName;
-                echo '<a class="imagesA shadow" href="index.php?page=image&id=' . $uniqueName . '"><img src="' . $thumbnailUrl . '" alt="Image" class="rounded shadow img-fluid imagesImg"></a>';
+                $timestamp = filemtime('uploads/' . $uniqueName); // Get the upload timestamp
+                $imagesWithTimestamp[] = ['filename' => $filename, 'uniqueName' => $uniqueName, 'viewCount' => $viewCount, 'timestamp' => $timestamp];
+            }
+
+            // Sort images by upload timestamp in descending order (newest first)
+            usort($imagesWithTimestamp, function($a, $b) {
+                return $b['timestamp'] - $a['timestamp'];
+            });
+
+            // Display the sorted images in a grid using Bootstrap grid system
+            echo '<div class="images">';
+            foreach ($imagesWithTimestamp as $imageData) {
+                $thumbnailUrl = 'thumbnails/' . $imageData['uniqueName'];
+                echo '<a class="imagesA shadow" href="index.php?page=image&id=' . $imageData['uniqueName'] . '"><img data-src="' . $thumbnailUrl . '" alt="Image" class="rounded shadow img-fluid imagesImg lazy-load"></a>';
             }
             echo '</div>';
             echo '<br>';
@@ -272,22 +320,45 @@ if ($page === 'upload') {
             $popularImages = getPopularImages();
             echo '<div class="images">';
             foreach ($popularImages as $image) {
-                echo '<a class="imagesA" href="index.php?page=image&id=' . $image['url'] . '"><img src="' . $image['thumbnail'] . '" alt="Image" class="rounded shadow img-fluid imagesImg"></a>';
+                echo '<a class="imagesA" href="index.php?page=image&id=' . $image['url'] . '"><img data-src="' . $image['thumbnail'] . '" alt="Image" class="rounded shadow lazy-load img-fluid imagesImg"></a>';
             }
             echo '</div>';
             echo '<br>';
         } elseif ($page === 'image' && isset($_GET['id'])) {
-            // Display full image and view count
+            // Display full image, view count, and image details
             $id = $_GET['id'];
             $imageInfo = file('uploaded_images.txt', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
             foreach ($imageInfo as $info) {
                 list($filename, $uniqueName, $viewCount) = explode('|', $info);
                 if ($uniqueName === $id) {
                     $imageUrl = 'uploads/' . $uniqueName;
+                    $imagePath = __DIR__ . '/' . $imageUrl; // Absolute path to the image file
+
+                    // Get image size in bytes
+                    $imageSizeBytes = filesize($imagePath);
+
+                    // Convert image size to MB
+                    $imageSizeMB = round($imageSizeBytes / (1024 * 1024), 2);
+
+                    // Get image resolution and type
+                    list($width, $height, $type) = getimagesize($imagePath);
+                    $imageType = image_type_to_mime_type($type);
+
+                    // Get the date and time the image was last modified
+                    $imageDateTime = date("Y-m-d H:i:s", filemtime($imagePath));
+
                     echo '<div class="container-fluid mt-4">';
                     echo '<h3 class="text-center">' . $filename . '</h3>';
                     echo '<img src="' . $imageUrl . '" alt="Image" class="rounded shadow my-2 img-fluid">';
                     echo '<p class="fw-bold">View Count: ' . $viewCount . '</p>';
+                    echo '<p class="fw-bold">File Size: ' . $imageSizeMB . ' MB</p>';
+                    echo '<p class="fw-bold">Resolution: ' . $width . 'x' . $height . '</p>';
+                    echo '<p class="fw-bold">Image Type: ' . $imageType . '</p>';
+                    echo '<p class="fw-bold">Upload Date and Time: ' . $imageDateTime . '</p>';
+
+                    // Add a download link
+                    echo '<p><a class="fw-bold" href="' . $imageUrl . '" download="' . $filename . '">Download Image</a></p>';
+
                     echo '</div>';
                     echo '<br>';
                 }
@@ -295,5 +366,52 @@ if ($page === 'upload') {
         }
         ?>
     </main>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            let lazyloadImages;
+            if ("IntersectionObserver" in window) {
+                lazyloadImages = document.querySelectorAll(".lazy-load");
+                let imageObserver = new IntersectionObserver(function (entries, observer) {
+                    entries.forEach(function (entry) {
+                        if (entry.isIntersecting) {
+                            let image = entry.target;
+                            image.src = image.dataset.src;
+                            image.classList.remove("lazy-load");
+                            imageObserver.unobserve(image);
+                        }
+                    });
+                });
+                lazyloadImages.forEach(function (image) {
+                    imageObserver.observe(image);
+                });
+            } else {
+                let lazyloadThrottleTimeout;
+                lazyloadImages = document.querySelectorAll(".lazy-load");
+    
+                function lazyload() {
+                    if (lazyloadThrottleTimeout) {
+                        clearTimeout(lazyloadThrottleTimeout);
+                    }
+                    lazyloadThrottleTimeout = setTimeout(function () {
+                        let scrollTop = window.pageYOffset;
+                        lazyloadImages.forEach(function (img) {
+                            if (img.offsetTop < window.innerHeight + scrollTop) {
+                                img.src = img.dataset.src;
+                                img.classList.remove('lazy-load');
+                            }
+                        });
+                        if (lazyloadImages.length === 0) {
+                            document.removeEventListener("scroll", lazyload);
+                            window.removeEventListener("resize", lazyload);
+                            window.removeEventListener("orientationChange", lazyload);
+                        }
+                    }, 20);
+                }
+                document.addEventListener("scroll", lazyload);
+                window.addEventListener("resize", lazyload);
+                window.addEventListener("orientationChange", lazyload);
+            }
+        });
+    </script>
 </body>
 </html>
